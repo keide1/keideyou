@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>管理者 | Emotion City OS</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="admin-view admin-page">
+      <aside class="sidebar">
+        <div class="brand-mark">E</div>
+        <nav aria-label="管理メニュー">
+          <button class="nav-item active" data-admin-page="tickets" type="button">案件</button>
+          <button class="nav-item" data-admin-page="sharing" type="button">部署共有</button>
+          <button class="nav-item" data-admin-page="analytics" type="button">分析</button>
+          <button class="nav-item" data-admin-page="sync" type="button">同期</button>
+        </nav>
+      </aside>
+
+      <div class="admin-main">
+        <div class="admin-header">
+          <div>
+            <p class="eyebrow">PC管理者用画面</p>
+            <h1 id="adminPageTitle">問い合わせ対応を整理する</h1>
+            <p id="adminPageLead" class="admin-lead">AIが要約・危険度・担当課を整理し、対応完了まで追跡します。</p>
+          </div>
+          <div class="admin-actions">
+            <a href="./resident.html">住民画面</a>
+            <div class="sync-state">
+              <span class="pulse"></span>
+              ローカル稼働中 / クラウド匿名同期待機
+            </div>
+          </div>
+        </div>
+
+        <div class="metrics-row">
+          <article>
+            <span>未完了</span>
+            <strong id="metricOpen">0</strong>
+          </article>
+          <article>
+            <span>優先度4以上</span>
+            <strong id="metricHigh">0</strong>
+          </article>
+          <article>
+            <span>完了</span>
+            <strong id="metricDone">0</strong>
+          </article>
+          <article>
+            <span>担当部署</span>
+            <strong id="metricDepartments">0</strong>
+          </article>
+        </div>
+
+        <section class="admin-section active" data-admin-section="tickets">
+          <div class="workspace-grid">
+            <section class="ticket-list">
+              <div class="section-heading">
+                <div>
+                  <h2>問い合わせ一覧</h2>
+                  <p>行を選ぶと右側にAI判断と対応操作が表示されます。</p>
+                </div>
+                <button id="seedButton" type="button">サンプル追加</button>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                    <th>優先度</th>
+                      <th>カテゴリ</th>
+                      <th>場所</th>
+                      <th>担当</th>
+                      <th>状態</th>
+                    </tr>
+                  </thead>
+                  <tbody id="ticketTable"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="detail-panel">
+              <div class="section-heading">
+                <div>
+                  <h2>AI判断・対応</h2>
+                  <p>完了後は一覧・分析・部署共有にも反映されます。</p>
+                </div>
+                <span id="selectedId">EC-0001</span>
+              </div>
+              <div id="detailBody" class="detail-body"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="admin-section" data-admin-section="sharing">
+          <div class="section-heading wide-heading">
+            <div>
+              <h2>部署共有</h2>
+              <p>問い合わせを担当課ごとに分け、横断対応が必要なものを見つけやすくします。</p>
+            </div>
+          </div>
+          <div id="departmentBoard" class="department-board"></div>
+        </section>
+
+        <section class="admin-section" data-admin-section="analytics">
+          <div class="section-heading wide-heading">
+            <div>
+              <h2>分析</h2>
+              <p>住民不安をカテゴリ・AI優先度・未完了状況から把握します。</p>
+            </div>
+          </div>
+          <div class="analytics-grid">
+            <section class="analytics-panel">
+              <h3>カテゴリ別件数</h3>
+              <div id="categoryChart" class="bar-chart"></div>
+            </section>
+            <section class="analytics-panel">
+              <h3>AI優先度別件数</h3>
+              <div id="riskChart" class="risk-stack"></div>
+            </section>
+            <section class="analytics-panel">
+              <h3>対応状況</h3>
+              <div id="statusChart" class="status-cards"></div>
+            </section>
+            <section class="analytics-panel">
+              <h3>AIが拾った主な論点</h3>
+              <div id="tagCloud" class="tag-cloud"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="admin-section" data-admin-section="sync">
+          <div class="section-heading wide-heading">
+            <div>
+              <h2>同期</h2>
+              <p>個人情報と原文はローカルに残し、匿名統計だけをクラウドに送る運用です。</p>
+            </div>
+            <button id="syncButton" type="button">匿名データを同期</button>
+          </div>
+          <div class="sync-grid">
+            <section class="sync-panel">
+              <span>LOCAL</span>
+              <h3>庁内ローカル</h3>
+              <p>住民投稿の原文、場所、対応履歴、担当者メモを保持します。</p>
+              <dl>
+                <dt>保存件数</dt>
+                <dd id="localCount">0件</dd>
+                <dt>状態</dt>
+                <dd>稼働中</dd>
+              </dl>
+            </section>
+            <section class="sync-panel">
+              <span>CLOUD</span>
+              <h3>クラウド分析基盤</h3>
+              <p>カテゴリ、タグ、危険度、対応結果だけを匿名化して同期します。</p>
+              <dl>
+                <dt>同期対象</dt>
+                <dd id="cloudCount">0件</dd>
+                <dt>最終同期</dt>
+                <dd id="lastSync">未実行</dd>
+              </dl>
+            </section>
+          </div>
+          <section class="sync-log-panel">
+            <h3>同期ログ</h3>
+            <ul id="syncLog"></ul>
+          </section>
+        </section>
+      </div>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
