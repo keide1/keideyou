@@ -1,6 +1,5 @@
-const STORAGE_KEY = "emotion-city-os-v3-narashino-tickets";
+const STORAGE_KEY = "emotion-city-os-v4-narashino-map-tickets";
 const SYNC_KEY = "emotion-city-os-sync-log";
-const CITY_CENTER = [35.6811, 140.0266];
 const CITY_NAME = "習志野市";
 
 const sampleTickets = [
@@ -58,8 +57,6 @@ let tickets = loadTickets();
 let syncLog = loadSyncLog();
 let selectedTicketId = tickets[0]?.id;
 let activeAdminPage = "tickets";
-let cityMap;
-let cityMarkers = [];
 
 const form = document.querySelector("#inquiryForm");
 const receiptPanel = document.querySelector("#receiptPanel");
@@ -87,7 +84,13 @@ const cloudCount = document.querySelector("#cloudCount");
 const lastSync = document.querySelector("#lastSync");
 const syncLogList = document.querySelector("#syncLog");
 const cityMapEl = document.querySelector("#cityMap");
-const mapFallback = document.querySelector("#mapFallback");
+const googleMapFrame = document.querySelector("#googleMapFrame");
+const mapTicketPins = document.querySelector("#mapTicketPins");
+const fitMapButton = document.querySelector("#fitMapButton");
+const focusSelectedButton = document.querySelector("#focusSelectedButton");
+const notificationBell = document.querySelector("#notificationBell");
+const notificationCount = document.querySelector("#notificationCount");
+const notificationPanel = document.querySelector("#notificationPanel");
 
 if (form) {
   form.addEventListener("submit", (event) => {
@@ -171,6 +174,21 @@ if (syncButton) {
   });
 }
 
+if (fitMapButton) {
+  fitMapButton.addEventListener("click", () => focusFirstPendingTicket());
+}
+
+if (focusSelectedButton) {
+  focusSelectedButton.addEventListener("click", () => focusSelectedOnMap());
+}
+
+if (notificationBell && notificationPanel) {
+  notificationBell.addEventListener("click", () => {
+    notificationPanel.hidden = !notificationPanel.hidden;
+    renderNotifications();
+  });
+}
+
 function loadTickets() {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) return sampleTickets;
@@ -222,11 +240,28 @@ function nextId() {
 
 function analyze(ticket) {
   const text = `${ticket.place} ${ticket.category} ${ticket.message}`;
-  const signals = [
-    { words: ["ひび", "亀裂", "倒れ", "崩れ", "陥没", "冠水", "漏電"], weight: 4, label: "構造・災害リスク" },
-    { words: ["子供", "高齢者", "通学路", "学校", "保育", "車道"], weight: 3, label: "要配慮者・交通リスク" },
-    { words: ["暗", "見えにくい", "段差", "つまず", "滑", "雨", "排水"], weight: 2, label: "事故につながる環境不安" },
-    { words: ["不安", "心配", "危", "怖"], weight: 1, label: "住民不安の明示" },
+  const hasAny = (words) => words.some((word) => text.includes(word));
+  const evaluations = [
+    evaluateAxis(text, "immediacy", "切迫性", 5, [
+      { words: ["今", "すぐ", "倒れそう", "崩れそう", "漏電", "冠水して", "浸水して", "陥没", "通れない"], points: 5 },
+      { words: ["危", "事故", "けが", "転倒", "怖"], points: 2 },
+    ]),
+    evaluateAxis(text, "damage", "被害の大きさ", 5, [
+      { words: ["倒壊", "崩れ", "陥没", "冠水", "漏電", "ブロック塀", "ひび", "亀裂"], points: 4 },
+      { words: ["段差", "滑", "水たまり", "暗", "見えにくい"], points: 2 },
+    ]),
+    evaluateAxis(text, "exposure", "人の多さ・弱者", 5, [
+      { words: ["通学路", "学校", "保育", "子供", "高齢者", "駅前", "ロータリー"], points: 3 },
+      { words: ["歩道", "公園", "交差点", "人が多い"], points: 2 },
+    ]),
+    evaluateAxis(text, "traffic", "交通影響", 4, [
+      { words: ["車道", "交差点", "アンダーパス", "渋滞", "減速", "避ける"], points: 3 },
+      { words: ["歩道", "駅", "ロータリー"], points: 1 },
+    ]),
+    evaluateAxis(text, "repeatability", "再発性・悪化", 3, [
+      { words: ["毎日", "いつも", "短時間の雨", "雨の日", "夜になると"], points: 2 },
+      { words: ["心配", "不安"], points: 1 },
+    ]),
   ];
   const categoryWeights = {
     "防災・避難": 3,
@@ -236,14 +271,25 @@ function analyze(ticket) {
     公園: 1,
     その他: 0,
   };
-  const matchedSignals = [];
-  const signalScore = signals.reduce((sum, signal) => {
-    const matched = signal.words.some((word) => text.includes(word));
-    if (matched) matchedSignals.push(signal.label);
-    return sum + (matched ? signal.weight : 0);
-  }, 0);
-  const score = signalScore + (categoryWeights[ticket.category] || 0);
-  const priority = scoreToPriority(score);
+  const evaluationResults = evaluations;
+  const categoryScore = categoryWeights[ticket.category] || 0;
+  const score = evaluationResults.reduce((sum, item) => sum + item.value, 0) + categoryScore;
+  const riskFlags = {
+    immediateDanger: hasAny(["倒れそう", "崩れそう", "漏電", "冠水して", "浸水して", "陥没", "通れない"]),
+    vulnerableTraffic: hasAny(["子供", "高齢者", "通学路", "学校"]) && hasAny(["車道", "交差点", "歩道", "駅前"]),
+    structuralPublic: hasAny(["ひび", "亀裂", "ブロック塀", "倒壊", "崩れ"]) && hasAny(["通学路", "学校", "公園", "歩道", "駅前"]),
+    discomfortOnly: !hasAny(["ひび", "亀裂", "倒れ", "崩れ", "陥没", "冠水", "漏電", "車道", "通学路", "子供", "高齢者", "転倒", "事故"]) && hasAny(["不安", "心配", "暗"]),
+  };
+  const priority = decidePriority(score, riskFlags);
+  const verdict = priority >= 5
+    ? "緊急対応"
+    : priority === 4
+      ? "早期対応"
+      : priority === 3
+        ? "通常確認"
+        : priority === 2
+          ? "経過観察"
+          : "低優先";
   const departmentMap = {
     "道路・歩道": "道路維持課",
     街灯: "防犯交通課",
@@ -263,10 +309,14 @@ function analyze(ticket) {
     priority,
     department: departmentMap[ticket.category] || "市民相談課",
     score,
-    matchedSignals,
+    categoryScore,
+    evaluations: evaluationResults,
+    verdict,
+    riskFlags,
+    matchedSignals: evaluationResults.filter((item) => item.value > 0).map((item) => item.label),
     tags,
-    summary: `${ticket.place}で「${ticket.category}」に関する不安が投稿されています。本文・場所・カテゴリからAIが優先度${priority}と判定しました。`,
-    action: priority >= 4 ? "24時間以内に現地確認、必要に応じて注意喚起を掲示" : "3営業日以内に確認し、類似投稿と統合して判断",
+    summary: `${ticket.place}で「${ticket.category}」に関する投稿です。AIは切迫性・被害規模・人の多さ・交通影響・再発性を分けて評価し、優先度${priority}（${verdict}）と判定しました。`,
+    action: recommendedAction(priority),
   };
 }
 
@@ -288,6 +338,7 @@ function renderAll() {
   renderTable();
   renderDetail();
   renderMetrics();
+  renderNotifications();
   renderDepartments();
   renderAnalytics();
   renderSync();
@@ -312,63 +363,56 @@ function renderAdminShell() {
 }
 
 function renderCityMap() {
-  if (!cityMapEl) return;
-  if (window.L) {
-    mapFallback.hidden = true;
-    cityMapEl.hidden = false;
-    if (!cityMap) {
-      cityMap = L.map(cityMapEl, {
-        zoomControl: true,
-        scrollWheelZoom: false,
-      }).setView(CITY_CENTER, 14);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        attribution: "&copy; OpenStreetMap contributors",
-      }).addTo(cityMap);
-    }
-    cityMarkers.forEach((marker) => marker.remove());
-    cityMarkers = tickets.map((ticket) => {
-      const result = analyze(ticket);
-      const marker = L.circleMarker([ticket.lat, ticket.lng], {
-        radius: 9,
-        color: priorityColor(result.priority),
-        fillColor: priorityColor(result.priority),
-        fillOpacity: 0.88,
-        weight: 2,
-      })
-        .addTo(cityMap)
-        .bindPopup(`<b>${ticket.id}</b><br>${ticket.place}<br>優先度 ${result.priority} / 5<br>${ticket.status}`);
-      marker.on("click", () => {
-        selectedTicketId = ticket.id;
-        renderTable();
-        renderDetail();
-      });
-      return marker;
-    });
-    setTimeout(() => cityMap.invalidateSize(), 0);
-    return;
-  }
+  if (!cityMapEl || !googleMapFrame) return;
+  const selected = tickets.find((item) => item.id === selectedTicketId) || tickets[0];
+  if (!selected) return;
+  googleMapFrame.src = googleMapsEmbedUrl(selected);
 
-  cityMapEl.hidden = true;
-  if (!mapFallback) return;
-  mapFallback.hidden = false;
-  mapFallback.innerHTML = tickets
+  if (!mapTicketPins) return;
+  mapTicketPins.innerHTML = tickets
     .map((ticket) => {
       const result = analyze(ticket);
-      const x = clamp(((ticket.lng - 139.995) / 0.09) * 100, 4, 96);
-      const y = clamp((1 - (ticket.lat - 35.655) / 0.045) * 100, 4, 96);
-      return `<button type="button" data-map-ticket="${ticket.id}" style="left:${x}%;top:${y}%">
-        <span>${result.priority}</span>
-      </button>`;
+      return `
+        <button type="button" data-map-ticket="${ticket.id}" class="${ticket.id === selectedTicketId ? "active" : ""}">
+          <span class="priority ${priorityClass(result.priority)}">${result.priority}</span>
+          <div>
+            <b>${ticket.place}</b>
+            <small>${ticket.status} / ${ticket.lat.toFixed(4)}, ${ticket.lng.toFixed(4)}</small>
+          </div>
+        </button>
+      `;
     })
     .join("");
-  mapFallback.querySelectorAll("[data-map-ticket]").forEach((button) => {
+  mapTicketPins.querySelectorAll("[data-map-ticket]").forEach((button) => {
     button.addEventListener("click", () => {
       selectedTicketId = button.dataset.mapTicket;
+      renderCityMap();
       renderTable();
       renderDetail();
     });
   });
+}
+
+function googleMapsEmbedUrl(ticket) {
+  const query = encodeURIComponent(`${ticket.lat},${ticket.lng}`);
+  return `https://www.google.com/maps?q=${query}&z=18&output=embed`;
+}
+
+function focusFirstPendingTicket() {
+  const pending = tickets
+    .filter((ticket) => ticket.status !== "完了")
+    .sort((a, b) => analyze(b).priority - analyze(a).priority);
+  selectedTicketId = (pending[0] || tickets[0])?.id;
+  renderCityMap();
+  renderTable();
+  renderDetail();
+}
+
+function focusSelectedOnMap() {
+  const ticket = tickets.find((item) => item.id === selectedTicketId) || tickets[0];
+  if (!ticket) return;
+  if (googleMapFrame) googleMapFrame.src = googleMapsEmbedUrl(ticket);
+  renderCityMap();
 }
 
 function renderTable() {
@@ -388,6 +432,7 @@ function renderTable() {
     `;
     row.addEventListener("click", () => {
       selectedTicketId = ticket.id;
+      renderCityMap();
       renderTable();
       renderDetail();
     });
@@ -405,6 +450,7 @@ function renderDetail() {
   detailBody.innerHTML = `
     <div class="detail-status-line">
       <span class="priority ${priorityClass(result.priority)}">優先度 ${result.priority} / 5</span>
+      <span class="verdict-pill">${result.verdict}</span>
       <span class="status-pill ${statusClass(ticket.status)}">${ticket.status}</span>
     </div>
     <div>
@@ -413,7 +459,24 @@ function renderDetail() {
     </div>
     <div class="ai-reason-box">
       <h3>AI判定根拠</h3>
-      <p>AIスコア ${result.score} から5段階で算出 / 住民の体感不安度 ${ticket.risk} は参考として保持</p>
+      <p>複数評価の合計スコア ${result.score} から5段階で算出 / 住民の体感不安度 ${ticket.risk} は参考として保持</p>
+      <div class="evaluation-list">
+        ${result.evaluations
+          .map((item) => `
+            <div class="evaluation-row">
+              <span>${item.label}</span>
+              <div><i style="width:${Math.round((item.value / item.max) * 100)}%"></i></div>
+              <b>${item.value}/${item.max}</b>
+            </div>
+          `)
+          .join("")}
+        <div class="evaluation-row category-row">
+          <span>カテゴリ補正</span>
+          <div><i style="width:${Math.round((result.categoryScore / 3) * 100)}%"></i></div>
+          <b>${result.categoryScore}/3</b>
+        </div>
+      </div>
+      <p class="judge-note">${judgeReason(result)}</p>
       <div class="tag-row">
         ${(result.matchedSignals.length ? result.matchedSignals : ["明確な危険語は少ない"])
           .map((signal) => `<span>${signal}</span>`)
@@ -471,6 +534,51 @@ function renderMetrics() {
   metricHigh.textContent = tickets.filter((ticket) => analyze(ticket).priority >= 4 && ticket.status !== "完了").length;
   metricDone.textContent = tickets.filter((ticket) => ticket.status === "完了").length;
   metricDepartments.textContent = departments.size;
+}
+
+function renderNotifications() {
+  if (!notificationCount || !notificationPanel) return;
+  const pending = tickets
+    .filter((ticket) => ticket.status !== "完了")
+    .sort((a, b) => analyze(b).priority - analyze(a).priority);
+  notificationCount.textContent = pending.length;
+  notificationCount.hidden = pending.length === 0;
+  notificationPanel.innerHTML = `
+    <div class="notification-head">
+      <strong>問い合わせ通知</strong>
+      <span>${pending.length}件</span>
+    </div>
+    ${
+      pending.length
+        ? `<ul>${pending
+            .slice(0, 8)
+            .map((ticket) => {
+              const result = analyze(ticket);
+              return `
+                <li>
+                  <button type="button" data-notification-ticket="${ticket.id}">
+                    <span class="priority ${priorityClass(result.priority)}">${result.priority}</span>
+                    <div>
+                      <b>${ticket.place}</b>
+                      <small>${ticket.category}・${ticket.status}</small>
+                    </div>
+                  </button>
+                </li>
+              `;
+            })
+            .join("")}</ul>`
+        : `<p>未完了の通知はありません。</p>`
+    }
+  `;
+  notificationPanel.querySelectorAll("[data-notification-ticket]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedTicketId = button.dataset.notificationTicket;
+      activeAdminPage = "tickets";
+      notificationPanel.hidden = true;
+      renderAll();
+      focusSelectedOnMap();
+    });
+  });
 }
 
 function renderDepartments() {
@@ -610,39 +718,74 @@ function priorityClass(priority) {
   return "p1";
 }
 
-function priorityColor(priority) {
-  if (priority >= 5) return "#c84b45";
-  if (priority === 4) return "#d96f3c";
-  if (priority === 3) return "#d28a2e";
-  if (priority === 2) return "#2e6f9e";
-  return "#4f9f87";
-}
-
 function estimateNarashinoPoint(place) {
   const text = String(place || "");
-  if (text.includes("津田沼")) return { lat: 35.6912, lng: 140.0202 };
-  if (text.includes("谷津")) return { lat: 35.6742, lng: 140.0086 };
-  if (text.includes("実籾")) return { lat: 35.6865, lng: 140.0685 };
-  if (text.includes("新習志野")) return { lat: 35.6679, lng: 140.0127 };
-  if (text.includes("大久保")) return { lat: 35.6868, lng: 140.0488 };
-  if (text.includes("市役所") || text.includes("鷺沼")) return { lat: 35.6811, lng: 140.0266 };
+  const knownPlaces = [
+    { keys: ["津田沼駅", "津田沼"], lat: 35.6914, lng: 140.0203 },
+    { keys: ["新津田沼"], lat: 35.6905, lng: 140.0237 },
+    { keys: ["京成津田沼"], lat: 35.6834, lng: 140.0242 },
+    { keys: ["谷津干潟"], lat: 35.6741, lng: 140.0059 },
+    { keys: ["谷津駅", "谷津"], lat: 35.6851, lng: 140.0077 },
+    { keys: ["実籾駅", "実籾"], lat: 35.6868, lng: 140.0691 },
+    { keys: ["新習志野駅", "新習志野"], lat: 35.6675, lng: 140.0127 },
+    { keys: ["京成大久保", "大久保"], lat: 35.6859, lng: 140.0495 },
+    { keys: ["幕張本郷"], lat: 35.6728, lng: 140.0425 },
+    { keys: ["市役所", "鷺沼"], lat: 35.6812, lng: 140.0265 },
+    { keys: ["香澄"], lat: 35.6609, lng: 140.0178 },
+    { keys: ["袖ケ浦", "袖ヶ浦"], lat: 35.6701, lng: 140.0197 },
+    { keys: ["秋津"], lat: 35.6652, lng: 140.0082 },
+    { keys: ["茜浜"], lat: 35.6538, lng: 140.0194 },
+    { keys: ["東習志野"], lat: 35.6981, lng: 140.0663 },
+    { keys: ["藤崎"], lat: 35.6891, lng: 140.0346 },
+    { keys: ["屋敷"], lat: 35.6798, lng: 140.0419 },
+    { keys: ["泉町"], lat: 35.6915, lng: 140.0537 },
+    { keys: ["本大久保"], lat: 35.6847, lng: 140.0428 },
+    { keys: ["花咲"], lat: 35.6761, lng: 140.0473 },
+  ];
+  const match = knownPlaces.find((entry) => entry.keys.some((key) => text.includes(key)));
+  if (match) return { lat: match.lat, lng: match.lng };
   const hash = Array.from(text || "narashino").reduce((sum, char) => sum + char.charCodeAt(0), 0);
   return {
-    lat: 35.6811 + ((hash % 21) - 10) * 0.0012,
-    lng: 140.0266 + ((hash % 25) - 12) * 0.0018,
+    lat: 35.6811 + ((hash % 19) - 9) * 0.001,
+    lng: 140.0266 + ((hash % 21) - 10) * 0.0014,
   };
 }
 
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
+function evaluateAxis(text, key, label, max, rules) {
+  const raw = rules.reduce((sum, rule) => {
+    return sum + (rule.words.some((word) => text.includes(word)) ? rule.points : 0);
+  }, 0);
+  return {
+    key,
+    label,
+    max,
+    value: Math.min(max, raw),
+  };
 }
 
-function scoreToPriority(score) {
-  if (score >= 8) return 5;
-  if (score >= 6) return 4;
-  if (score >= 3) return 3;
-  if (score >= 1) return 2;
-  return 1;
+function decidePriority(score, flags) {
+  if (flags.immediateDanger || flags.structuralPublic) return 5;
+  if (flags.vulnerableTraffic) return 4;
+  let priority = score >= 14 ? 5 : score >= 10 ? 4 : score >= 6 ? 3 : score >= 3 ? 2 : 1;
+  if (flags.discomfortOnly) priority = Math.min(priority, 3);
+  return priority;
+}
+
+function recommendedAction(priority) {
+  if (priority >= 5) return "即日確認。危険箇所の一時封鎖・注意喚起・担当課への緊急共有を検討";
+  if (priority === 4) return "24時間以内に現地確認。必要に応じて注意喚起と補修予定化";
+  if (priority === 3) return "3営業日以内に確認し、類似投稿や過去対応履歴と統合して判断";
+  if (priority === 2) return "通常巡回時に確認。再発投稿が増えた場合は優先度を引き上げ";
+  return "記録として保存。追加投稿や写真が届いた場合に再評価";
+}
+
+function judgeReason(result) {
+  const flags = result.riskFlags;
+  if (flags.immediateDanger) return "即時危険を示す語があるため、点数に関係なく最上位にしています。";
+  if (flags.structuralPublic) return "構造破損と公共利用地点が重なっているため、重大事故の予防として最上位にしています。";
+  if (flags.vulnerableTraffic) return "子供・高齢者などの要配慮者と交通/歩行リスクが重なっているため、早期対応にしています。";
+  if (flags.discomfortOnly) return "不安表現のみで具体的な事故兆候が少ないため、過大評価を抑えています。";
+  return "複数評価の合計点から、通常の基準で優先度を算出しています。";
 }
 
 function statusClass(status) {

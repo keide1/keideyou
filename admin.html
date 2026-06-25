@@ -4,12 +4,6 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>管理者 | Emotion City OS</title>
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIINfQBCpNY2E2fHEhWbUf7PcjGGw58TgZw="
-      crossorigin=""
-    />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -29,9 +23,16 @@
           <div>
             <p class="eyebrow">習志野市 PC管理者用画面</p>
             <h1 id="adminPageTitle">問い合わせ対応を整理する</h1>
-            <p id="adminPageLead" class="admin-lead">AIが要約・危険度・担当課を整理し、対応完了まで追跡します。</p>
+            <p id="adminPageLead" class="admin-lead">AIが複数評価から優先度を算出し、担当課と対応完了まで追跡します。</p>
           </div>
           <div class="admin-actions">
+            <div class="notification-wrap">
+              <button id="notificationBell" class="notification-bell" type="button" aria-label="問い合わせ通知">
+                <span class="bell-symbol">!</span>
+                <b id="notificationCount">0</b>
+              </button>
+              <div id="notificationPanel" class="notification-panel" hidden></div>
+            </div>
             <a href="./resident.html">住民画面</a>
             <div class="sync-state">
               <span class="pulse"></span>
@@ -66,10 +67,15 @@
                 <h2>習志野市 問い合わせマップ</h2>
                 <p>市内の問い合わせ地点を地図上に表示します。ピンを押すと案件詳細に移動します。</p>
               </div>
-              <span class="map-note">OpenStreetMap</span>
+              <div class="map-actions">
+                <button id="fitMapButton" type="button">未完了の先頭へ</button>
+                <button id="focusSelectedButton" type="button">選択地点へ</button>
+              </div>
             </div>
-            <div id="cityMap" class="city-map" aria-label="習志野市問い合わせマップ"></div>
-            <div id="mapFallback" class="map-fallback" hidden></div>
+            <div id="cityMap" class="city-map google-map-shell" aria-label="習志野市問い合わせマップ">
+              <iframe id="googleMapFrame" title="Google Maps selected inquiry location" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+            </div>
+            <div id="mapTicketPins" class="map-ticket-pins" aria-label="問い合わせ地点一覧"></div>
           </section>
 
           <div class="workspace-grid">
@@ -187,11 +193,6 @@
       </div>
     </main>
 
-    <script
-      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-      crossorigin=""
-    ></script>
     <script src="./app.js"></script>
   </body>
 </html>
