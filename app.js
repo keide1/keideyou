@@ -1,46 +1,56 @@
-const STORAGE_KEY = "emotion-city-os-v2-tickets";
+const STORAGE_KEY = "emotion-city-os-v3-narashino-tickets";
 const SYNC_KEY = "emotion-city-os-sync-log";
+const CITY_CENTER = [35.6811, 140.0266];
+const CITY_NAME = "習志野市";
 
 const sampleTickets = [
   {
     id: "EC-0001",
-    place: "中央公園 北側入口",
+    place: "津田沼駅 北口ロータリー",
     category: "公園",
-    message: "夜になると街灯が暗く、段差も見えにくい。高齢者や子供がつまずきそうで不安です。",
+    message: "夜になると駅前広場の一部が暗く、段差も見えにくい。高齢者や子供がつまずきそうで不安です。",
     risk: "高",
     status: "未対応",
     createdAt: "2026-06-05 09:18",
     completedAt: "",
+    lat: 35.6912,
+    lng: 140.0202,
   },
   {
     id: "EC-0002",
-    place: "青葉通り 2丁目交差点",
+    place: "谷津干潟公園 西側歩道",
     category: "道路・歩道",
     message: "雨の日に排水が悪く、歩道に水がたまります。車道へ避ける人が多いです。",
     risk: "中",
     status: "確認中",
     createdAt: "2026-06-05 10:41",
     completedAt: "",
+    lat: 35.6742,
+    lng: 140.0086,
   },
   {
     id: "EC-0003",
-    place: "東小学校前",
+    place: "実籾駅前 通学路",
     category: "防災・避難",
     message: "通学路のブロック塀にひびがあり、地震の時に倒れないか心配です。",
     risk: "高",
     status: "担当課共有",
     createdAt: "2026-06-05 11:07",
     completedAt: "",
+    lat: 35.6865,
+    lng: 140.0685,
   },
   {
     id: "EC-0004",
-    place: "南町アンダーパス",
+    place: "新習志野駅 南口アンダーパス",
     category: "河川・排水",
     message: "短時間の雨で水がたまり、車が減速して渋滞します。冠水しないか心配です。",
     risk: "中",
     status: "未対応",
     createdAt: "2026-06-05 12:24",
     completedAt: "",
+    lat: 35.6679,
+    lng: 140.0127,
   },
 ];
 
@@ -48,6 +58,8 @@ let tickets = loadTickets();
 let syncLog = loadSyncLog();
 let selectedTicketId = tickets[0]?.id;
 let activeAdminPage = "tickets";
+let cityMap;
+let cityMarkers = [];
 
 const form = document.querySelector("#inquiryForm");
 const receiptPanel = document.querySelector("#receiptPanel");
@@ -74,6 +86,8 @@ const localCount = document.querySelector("#localCount");
 const cloudCount = document.querySelector("#cloudCount");
 const lastSync = document.querySelector("#lastSync");
 const syncLogList = document.querySelector("#syncLog");
+const cityMapEl = document.querySelector("#cityMap");
+const mapFallback = document.querySelector("#mapFallback");
 
 if (form) {
   form.addEventListener("submit", (event) => {
@@ -94,6 +108,7 @@ if (form) {
         minute: "2-digit",
       }),
       completedAt: "",
+      ...estimateNarashinoPoint(data.get("place")),
     };
 
     tickets = [ticket, ...tickets];
@@ -119,6 +134,8 @@ if (seedButton) {
         minute: "2-digit",
       }),
       completedAt: "",
+      lat: base.lat,
+      lng: base.lng,
     };
     tickets = [ticket, ...tickets];
     selectedTicketId = ticket.id;
@@ -186,6 +203,8 @@ function normalizeTicket(ticket) {
     status: ticket.status || "未対応",
     createdAt: ticket.createdAt || "",
     completedAt: ticket.completedAt || "",
+    lat: Number.isFinite(Number(ticket.lat)) ? Number(ticket.lat) : estimateNarashinoPoint(ticket.place).lat,
+    lng: Number.isFinite(Number(ticket.lng)) ? Number(ticket.lng) : estimateNarashinoPoint(ticket.place).lng,
   };
 }
 
@@ -265,6 +284,7 @@ function renderReceipt(ticket) {
 
 function renderAll() {
   renderAdminShell();
+  renderCityMap();
   renderTable();
   renderDetail();
   renderMetrics();
@@ -276,10 +296,10 @@ function renderAll() {
 function renderAdminShell() {
   if (!navItems.length || !adminSections.length) return;
   const copy = {
-    tickets: ["問い合わせ対応を整理する", "AIが要約・危険度・担当課を整理し、対応完了まで追跡します。"],
-    sharing: ["部署横断で共有する", "担当課ごとに案件を束ね、複数課で見るべき不安を見逃さないようにします。"],
-    analytics: ["住民不安を分析する", "カテゴリ、危険度、完了状況から都市課題の偏りを把握します。"],
-    sync: ["ローカルとクラウドを分けて運用する", "個人情報は庁内に残し、匿名統計だけをクラウドへ同期します。"],
+    tickets: [`${CITY_NAME}の問い合わせ対応を整理する`, "AIが要約・優先度・担当課を整理し、対応完了まで地図と一覧で追跡します。"],
+    sharing: [`${CITY_NAME}庁内で部署横断共有する`, "担当課ごとに案件を束ね、複数課で見るべき不安を見逃さないようにします。"],
+    analytics: [`${CITY_NAME}の住民不安を分析する`, "カテゴリ、AI優先度、完了状況から都市課題の偏りを把握します。"],
+    sync: [`${CITY_NAME}のローカルとクラウドを分けて運用する`, "個人情報は庁内に残し、匿名統計だけをクラウドへ同期します。"],
   };
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.adminPage === activeAdminPage));
   adminSections.forEach((section) => {
@@ -289,6 +309,66 @@ function renderAdminShell() {
     adminPageTitle.textContent = copy[activeAdminPage][0];
     adminPageLead.textContent = copy[activeAdminPage][1];
   }
+}
+
+function renderCityMap() {
+  if (!cityMapEl) return;
+  if (window.L) {
+    mapFallback.hidden = true;
+    cityMapEl.hidden = false;
+    if (!cityMap) {
+      cityMap = L.map(cityMapEl, {
+        zoomControl: true,
+        scrollWheelZoom: false,
+      }).setView(CITY_CENTER, 14);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "&copy; OpenStreetMap contributors",
+      }).addTo(cityMap);
+    }
+    cityMarkers.forEach((marker) => marker.remove());
+    cityMarkers = tickets.map((ticket) => {
+      const result = analyze(ticket);
+      const marker = L.circleMarker([ticket.lat, ticket.lng], {
+        radius: 9,
+        color: priorityColor(result.priority),
+        fillColor: priorityColor(result.priority),
+        fillOpacity: 0.88,
+        weight: 2,
+      })
+        .addTo(cityMap)
+        .bindPopup(`<b>${ticket.id}</b><br>${ticket.place}<br>優先度 ${result.priority} / 5<br>${ticket.status}`);
+      marker.on("click", () => {
+        selectedTicketId = ticket.id;
+        renderTable();
+        renderDetail();
+      });
+      return marker;
+    });
+    setTimeout(() => cityMap.invalidateSize(), 0);
+    return;
+  }
+
+  cityMapEl.hidden = true;
+  if (!mapFallback) return;
+  mapFallback.hidden = false;
+  mapFallback.innerHTML = tickets
+    .map((ticket) => {
+      const result = analyze(ticket);
+      const x = clamp(((ticket.lng - 139.995) / 0.09) * 100, 4, 96);
+      const y = clamp((1 - (ticket.lat - 35.655) / 0.045) * 100, 4, 96);
+      return `<button type="button" data-map-ticket="${ticket.id}" style="left:${x}%;top:${y}%">
+        <span>${result.priority}</span>
+      </button>`;
+    })
+    .join("");
+  mapFallback.querySelectorAll("[data-map-ticket]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedTicketId = button.dataset.mapTicket;
+      renderTable();
+      renderDetail();
+    });
+  });
 }
 
 function renderTable() {
@@ -528,6 +608,33 @@ function priorityClass(priority) {
   if (priority === 3) return "p3";
   if (priority === 2) return "p2";
   return "p1";
+}
+
+function priorityColor(priority) {
+  if (priority >= 5) return "#c84b45";
+  if (priority === 4) return "#d96f3c";
+  if (priority === 3) return "#d28a2e";
+  if (priority === 2) return "#2e6f9e";
+  return "#4f9f87";
+}
+
+function estimateNarashinoPoint(place) {
+  const text = String(place || "");
+  if (text.includes("津田沼")) return { lat: 35.6912, lng: 140.0202 };
+  if (text.includes("谷津")) return { lat: 35.6742, lng: 140.0086 };
+  if (text.includes("実籾")) return { lat: 35.6865, lng: 140.0685 };
+  if (text.includes("新習志野")) return { lat: 35.6679, lng: 140.0127 };
+  if (text.includes("大久保")) return { lat: 35.6868, lng: 140.0488 };
+  if (text.includes("市役所") || text.includes("鷺沼")) return { lat: 35.6811, lng: 140.0266 };
+  const hash = Array.from(text || "narashino").reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return {
+    lat: 35.6811 + ((hash % 21) - 10) * 0.0012,
+    lng: 140.0266 + ((hash % 25) - 12) * 0.0018,
+  };
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
 }
 
 function scoreToPriority(score) {
